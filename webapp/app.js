@@ -1,5 +1,10 @@
 // app.js - DiRueLei Web Application
 
+// CORS proxy for Artemis API requests (Artemis does not send CORS headers).
+// Users can deploy their own proxy (see cors-proxy/ folder) or use a public one.
+const ARTEMIS_CORS_PROXY = 'https://corsproxy.io/?url=';
+const ARTEMIS_API_BASE = 'https://artemis.tum.de/api/';
+
 class DiRueLeiApp {
     constructor() {
         this.loadingElement = document.getElementById('loading');
@@ -83,10 +88,22 @@ class DiRueLeiApp {
             case 'SCAN_COMPLETE':
                 this.handleScanComplete(data);
                 break;
+
+            case 'STUDENT_FILES':
+                this.handleStudentFilesReceived(data);
+                break;
                 
             case 'ERROR':
                 this.showStatus(data.message, 'error');
                 console.error('Worker error:', data.message);
+                
+                // Reset Artemis send UI if it was waiting for extract
+                const sendBtn = document.getElementById('send-artemis-btn');
+                const sendProgress = document.getElementById('artemis-send-progress');
+                if (sendBtn && sendProgress && sendProgress.innerText === 'Bereite Versand vor...') {
+                    sendBtn.disabled = false;
+                    sendProgress.innerText = '';
+                }
                 break;
                 
             default:
@@ -132,6 +149,12 @@ class DiRueLeiApp {
                     this.openPdfInNewTab(this.summaryBytes, 'Zusammenfassung.pdf');
                 });
             }
+
+            // Show the Artemis send section
+            const sendSection = document.getElementById('artemis-send-section');
+            if (sendSection) {
+                sendSection.classList.remove('hidden');
+            }
             
             this.showStatus('PDF Scan erfolgreich!', 'success');
         } catch (error) {
@@ -163,7 +186,11 @@ class DiRueLeiApp {
             {'id': 'show-qr-generation-btn', 'func': showQRGeneration, 'event': 'click'},
             {'id': 'back-from-qr-btn', 'func': showMainPage, 'event': 'click'},
             {'id': 'back-from-scan-btn', 'func': showMainPage, 'event': 'click'},
-            {'id': 'show-pdf-scan-btn', 'func': showPDFScan, 'event': 'click'}
+            {'id': 'show-pdf-scan-btn', 'func': showPDFScan, 'event': 'click'},
+            {'id': 'fetch-artemis-btn', 'func': this.handleFetchArtemis, 'event': 'click'},
+            {'id': 'artemis-help-toggle', 'func': this.toggleArtemisHelp, 'event': 'click'},
+            {'id': 'send-artemis-btn', 'func': this.handleSendViaArtemis, 'event': 'click'},
+            {'id': 'artemis-send-help-toggle', 'func': this.toggleArtemisSendHelp, 'event': 'click'}
         ];
 
         for (const listener of listeners) {
@@ -352,6 +379,283 @@ class DiRueLeiApp {
             
         } catch (error) {
             this.showStatus(`Fehler bei Lesen der CSV-Datei: ${error.message} ${error.stack}`, 'error');
+        }
+    }
+
+
+    async handleFetchArtemis() {
+        const jwtInput = document.getElementById('artemis-jwt');
+        const courseIdInput = document.getElementById('artemis-courseid');
+
+        const jwt = jwtInput.value.trim();
+        const courseId = courseIdInput.value.trim();
+
+        if (!jwt || !courseId) {
+            this.showStatus('Bitte JWT-Token und Course ID eingeben.', 'warning');
+            return;
+        }
+
+        const btn = document.getElementById('fetch-artemis-btn');
+        const originalText = btn.innerText;
+        btn.innerText = 'Lade...';
+        btn.disabled = true;
+
+        try {
+            this.showStatus('Lade Studierendendaten aus Artemis...', 'info', 3000);
+
+            const studentsData = await this.fetchArtemisStudents(jwt, courseId);
+
+            let studentsList = [];
+            if (Array.isArray(studentsData)) {
+                studentsList = studentsData;
+            } else if (studentsData.content) {
+                studentsList = studentsData.content;
+            } else if (studentsData.students) {
+                studentsList = studentsData.students;
+            }
+
+            if (studentsList.length === 0) {
+                this.showStatus('Keine Studierende für diesen Kurs gefunden.', 'warning');
+                return;
+            }
+
+            let students = studentsList.map(s => {
+                let name = s.name || `${s.firstName || ''} ${s.lastName || ''}`.trim();
+                return {
+                    id: s.id ? s.id.toString() : '',
+                    name: name
+                };
+            });
+
+            students.sort((a, b) => {
+                const getLastName = (student) => {
+                    const parts = student.name.split(' ');
+                    return parts[parts.length -1]
+                }
+                return getLastName(a).localeCompare(getLastName(b));
+            });
+
+            this.className = "_Artemis";
+            this.allStudents = students;
+
+            document.getElementById('generate-qr-btn').disabled = false;
+            document.getElementById('qr-settings').classList.remove('hidden');
+
+            this.showStatus(`Daten für ${this.allStudents.length} Studierende erfolgreich aus Artemis eingelesen.`, 'success');
+            this.populateStudentCheckboxes(this.allStudents);
+
+        } catch (error) {
+            console.error('Artemis API Error:', error);
+            this.showStatus(`Fehler: ${error.message}`, 'error');
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    /**
+     * Fetch students from Artemis, trying direct request first, then CORS proxy.
+     */
+    async fetchArtemisStudents(jwt, courseId) {
+        const endpoint = `core/courses/${courseId}/students`;
+        return await this.artemisApiRequest(jwt, endpoint, 'GET');
+    }
+
+    /**
+     * General purpose Artemis API request with CORS proxy fallback.
+     */
+    async artemisApiRequest(jwt, endpoint, method, body = null, isMultipart = false) {
+        const directUrl = ARTEMIS_API_BASE + endpoint;
+        
+        let headers = {
+            'Authorization': `Bearer ${jwt}`
+        };
+        
+        if (!isMultipart) {
+            headers['Accept'] = 'application/json';
+            if (body) {
+                headers['Content-Type'] = 'application/json';
+            }
+        }
+
+        let options = {
+            method: method,
+            headers: headers
+        };
+        
+        if (body) {
+            options.body = isMultipart ? body : JSON.stringify(body);
+        }
+
+        // Try 1: Direct request
+        if (!this.artemisCorsBlocked) {
+            try {
+                const response = await fetch(directUrl, options);
+                if (response.ok) {
+                    return await response.json();
+                }
+                throw new Error(`Artemis API Fehler: ${response.status} ${response.statusText}`);
+            } catch (directError) {
+                if (directError instanceof TypeError) {
+                    console.log('Direct request blocked by CORS, switching to proxy for future requests...');
+                    this.artemisCorsBlocked = true; // Remember that CORS is blocked to avoid console spam
+                } else {
+                    throw directError;
+                }
+            }
+        }
+
+        // Try 2: CORS proxy
+        try {
+            const proxyUrl = ARTEMIS_CORS_PROXY + encodeURIComponent(directUrl);
+            const response = await fetch(proxyUrl, options);
+            if (response.ok) {
+                return await response.json();
+            }
+            throw new Error(`Artemis API Fehler (über Proxy): ${response.status} ${response.statusText}`);
+        } catch (proxyError) {
+            if (proxyError instanceof TypeError) {
+                throw new Error(
+                    'Anfrage fehlgeschlagen: Artemis blockiert Cross-Origin-Anfragen (CORS). ' +
+                    'Bitte versuchen Sie es erneut oder nutzen Sie eine Browser-Erweiterung (z.B. "Allow CORS").'
+                );
+            }
+            throw proxyError;
+        }
+    }
+
+    toggleArtemisHelp(e) {
+        if (e) e.preventDefault();
+        const helpBox = document.getElementById('artemis-help-box');
+        if (helpBox) {
+            helpBox.classList.toggle('hidden');
+        }
+    }
+
+    toggleArtemisSendHelp(e) {
+        if (e) e.preventDefault();
+        const helpBox = document.getElementById('artemis-send-help-box');
+        if (helpBox) {
+            helpBox.classList.toggle('hidden');
+        }
+    }
+
+    async handleSendViaArtemis() {
+        const jwt = document.getElementById('artemis-send-jwt').value.trim();
+        const courseId = document.getElementById('artemis-send-courseid').value.trim();
+        
+        if (!jwt) {
+            this.showStatus('Bitte geben Sie Ihren Artemis JWT-Token ein.', 'error');
+            return;
+        }
+        if (!courseId) {
+            this.showStatus('Bitte geben Sie eine Course ID ein.', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('send-artemis-btn');
+        btn.disabled = true;
+        const progressSpan = document.getElementById('artemis-send-progress');
+        progressSpan.innerText = 'Bereite Versand vor...';
+
+        try {
+            // Ask worker to extract and return student files
+            this.scanWorker.postMessage({ type: 'EXTRACT_STUDENT_FILES' });
+        } catch (error) {
+            this.showStatus(`Fehler: ${error.message}`, 'error');
+            btn.disabled = false;
+            progressSpan.innerText = '';
+        }
+    }
+
+    async handleStudentFilesReceived(data) {
+        const jwt = document.getElementById('artemis-send-jwt').value.trim();
+        const courseId = document.getElementById('artemis-send-courseid').value.trim();
+        const btn = document.getElementById('send-artemis-btn');
+        const progressSpan = document.getElementById('artemis-send-progress');
+        const { studentFiles } = data;
+
+        if (!studentFiles || studentFiles.length === 0) {
+            this.showStatus('Keine Studierenden-Dateien zum Versenden gefunden.', 'error');
+            btn.disabled = false;
+            progressSpan.innerText = '';
+            return;
+        }
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (let i = 0; i < studentFiles.length; i++) {
+            const fileInfo = studentFiles[i];
+            const userId = fileInfo.userId;
+            const filename = fileInfo.filename;
+            
+            if (!userId) {
+                console.warn(`Skipping file ${filename}: No userId extracted.`);
+                errorCount++;
+                continue;
+            }
+
+            progressSpan.innerText = `Sende Datei ${i + 1} von ${studentFiles.length}...`;
+
+            try {
+                // 1. Create/Get one-to-one chat
+                const chatEndpoint = `communication/courses/${courseId}/one-to-one-chats/${userId}`;
+                const chatData = await this.artemisApiRequest(jwt, chatEndpoint, 'POST', {});
+                
+                const conversationId = chatData.id;
+                if (!conversationId) {
+                    throw new Error('Conversation ID konnte nicht ermittelt werden.');
+                }
+
+                // 2. Upload file
+                const uploadEndpoint = `core/files/courses/${courseId}/conversations/${conversationId}`;
+                const formData = new FormData();
+                const blob = new Blob([fileInfo.data], { type: 'application/pdf' });
+                formData.append('file', blob, filename);
+
+                const uploadData = await this.artemisApiRequest(jwt, uploadEndpoint, 'POST', formData, true);
+                
+                let fileRelativePath = '';
+                if (uploadData && uploadData.path) {
+                    fileRelativePath = uploadData.path;
+                } else if (typeof uploadData === 'string') {
+                    fileRelativePath = uploadData.trim();
+                }
+
+                if (!fileRelativePath) {
+                    throw new Error('Dateipfad konnte nach dem Upload nicht extrahiert werden.');
+                }
+
+                // 3. Send message
+                const msgEndpoint = `communication/courses/${courseId}/messages`;
+                const msgBody = {
+                    "content": `[${filename}](${fileRelativePath})`,
+                    "title": "",
+                    "hasForwardedMessages": false,
+                    "conversation": {
+                        "id": conversationId
+                    }
+                };
+                
+                await this.artemisApiRequest(jwt, msgEndpoint, 'POST', msgBody);
+                
+                successCount++;
+                this.handleScanLog(`Erfolgreich an ${fileInfo.studentName || userId} (${filename}) gesendet.`, 'success');
+            } catch (error) {
+                console.error(`Error sending to user ${userId}:`, error);
+                errorCount++;
+                this.handleScanLog(`Fehler beim Senden an User ${userId} (${filename}): ${error.message}`, 'error');
+            }
+        }
+
+        progressSpan.innerText = 'Versand abgeschlossen.';
+        btn.disabled = false;
+        
+        if (errorCount === 0) {
+            this.showStatus(`Alle ${successCount} Dateien wurden erfolgreich versendet!`, 'success');
+        } else {
+            this.showStatus(`${successCount} gesendet, ${errorCount} fehlerhaft. Details im Log.`, 'warning');
         }
     }
 

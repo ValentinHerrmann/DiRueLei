@@ -141,6 +141,25 @@ class ExamReader :
         else:
             self.logMsg("No ZIP data available. Call saveZipFile() first.", "error")
             return None
+
+    def get_student_files(self):
+        """Return list of {userId, filename, data} for each student PDF."""
+        import re
+        result = []
+        pattern = re.compile(r'^(.+?)_(\d+)\.pdf$')
+        for path, data in self.in_memory_files.items():
+            if path == "summary.pdf":
+                continue
+            filename = path.split("/")[-1]
+            match = pattern.match(filename)
+            if match:
+                user_id = match.group(2)
+                student_name = match.group(1)
+            else:
+                user_id = ""
+                student_name = filename
+            result.append({"userId": user_id, "studentName": student_name, "filename": filename, "data": data})
+        return result
             
     def close(self):
         self.fitz_source_pdf.close()
