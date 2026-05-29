@@ -755,3 +755,15 @@ body {
     align-self: flex-start;
     margin-top: 5px;
 }
+
+.artemis-send-actions {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-top: 5px;
+}
+
+.artemis-send-progress {
+    font-size: 13px;
+    color: #555;
+}
