@@ -374,11 +374,6 @@ class DiRueLeiApp {
         }
     }
 
-    toggleArtemisHelp(event) {
-        event.preventDefault();
-        const helpBox = document.getElementById('artemis-help-box');
-        helpBox.classList.toggle('hidden');
-    }
 
     async handleFetchArtemis() {
         const jwtInput = document.getElementById('artemis-jwt');
