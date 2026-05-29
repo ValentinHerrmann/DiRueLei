@@ -1,5 +1,10 @@
 // app.js - DiRueLei Web Application
 
+// CORS proxy for Artemis API requests (Artemis does not send CORS headers).
+// Users can deploy their own proxy (see cors-proxy/ folder) or use a public one.
+const ARTEMIS_CORS_PROXY = 'https://corsproxy.io/?url=';
+const ARTEMIS_API_BASE = 'https://artemis.tum.de/api/';
+
 class DiRueLeiApp {
     constructor() {
         this.loadingElement = document.getElementById('loading');
@@ -163,7 +168,9 @@ class DiRueLeiApp {
             {'id': 'show-qr-generation-btn', 'func': showQRGeneration, 'event': 'click'},
             {'id': 'back-from-qr-btn', 'func': showMainPage, 'event': 'click'},
             {'id': 'back-from-scan-btn', 'func': showMainPage, 'event': 'click'},
-            {'id': 'show-pdf-scan-btn', 'func': showPDFScan, 'event': 'click'}
+            {'id': 'show-pdf-scan-btn', 'func': showPDFScan, 'event': 'click'},
+            {'id': 'fetch-artemis-btn', 'func': this.handleFetchArtemis, 'event': 'click'},
+            {'id': 'artemis-help-toggle', 'func': this.toggleArtemisHelp, 'event': 'click'}
         ];
 
         for (const listener of listeners) {
@@ -352,6 +359,138 @@ class DiRueLeiApp {
             
         } catch (error) {
             this.showStatus(`Fehler bei Lesen der CSV-Datei: ${error.message} ${error.stack}`, 'error');
+        }
+    }
+
+    toggleArtemisHelp(event) {
+        event.preventDefault();
+        const helpBox = document.getElementById('artemis-help-box');
+        helpBox.classList.toggle('hidden');
+    }
+
+    async handleFetchArtemis() {
+        const jwtInput = document.getElementById('artemis-jwt');
+        const courseIdInput = document.getElementById('artemis-courseid');
+
+        const jwt = jwtInput.value.trim();
+        const courseId = courseIdInput.value.trim();
+
+        if (!jwt || !courseId) {
+            this.showStatus('Bitte JWT-Token und Course ID eingeben.', 'warning');
+            return;
+        }
+
+        const btn = document.getElementById('fetch-artemis-btn');
+        const originalText = btn.innerText;
+        btn.innerText = 'Lade...';
+        btn.disabled = true;
+
+        try {
+            this.showStatus('Lade Studierendendaten aus Artemis...', 'info', 3000);
+
+            const studentsData = await this.fetchArtemisStudents(jwt, courseId);
+
+            let studentsList = [];
+            if (Array.isArray(studentsData)) {
+                studentsList = studentsData;
+            } else if (studentsData.content) {
+                studentsList = studentsData.content;
+            } else if (studentsData.students) {
+                studentsList = studentsData.students;
+            }
+
+            if (studentsList.length === 0) {
+                this.showStatus('Keine Studierende für diesen Kurs gefunden.', 'warning');
+                return;
+            }
+
+            let students = studentsList.map(s => {
+                let name = s.name || `${s.firstName || ''} ${s.lastName || ''}`.trim();
+                return {
+                    id: s.id ? s.id.toString() : '',
+                    name: name
+                };
+            });
+
+            students.sort((a, b) => {
+                const getLastName = (student) => {
+                    const parts = student.name.split(' ');
+                    return parts[parts.length -1]
+                }
+                return getLastName(a).localeCompare(getLastName(b));
+            });
+
+            this.className = "_Artemis";
+            this.allStudents = students;
+
+            document.getElementById('generate-qr-btn').disabled = false;
+            document.getElementById('qr-settings').classList.remove('hidden');
+
+            this.showStatus(`Daten für ${this.allStudents.length} Studierende erfolgreich aus Artemis eingelesen.`, 'success');
+            this.populateStudentCheckboxes(this.allStudents);
+
+        } catch (error) {
+            console.error('Artemis API Error:', error);
+            this.showStatus(`Fehler: ${error.message}`, 'error');
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    /**
+     * Fetch students from Artemis, trying direct request first, then CORS proxy.
+     */
+    async fetchArtemisStudents(jwt, courseId) {
+        const endpoint = `core/courses/${courseId}/students`;
+        const directUrl = ARTEMIS_API_BASE + endpoint;
+
+        // Try 1: Direct request (works if CORS is allowed or same-origin)
+        try {
+            const response = await fetch(directUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${jwt}`,
+                    'Accept': 'application/json'
+                }
+            });
+            if (response.ok) {
+                return await response.json();
+            }
+            // If we get a non-ok status but didn't throw, CORS is not the issue
+            throw new Error(`Artemis API Fehler: ${response.status} ${response.statusText}`);
+        } catch (directError) {
+            // If it's a network/CORS error (TypeError: Failed to fetch), try proxy
+            if (directError instanceof TypeError) {
+                console.log('Direct request blocked by CORS, trying proxy...');
+            } else {
+                throw directError;
+            }
+        }
+
+        // Try 2: CORS proxy
+        try {
+            const proxyUrl = ARTEMIS_CORS_PROXY + encodeURIComponent(directUrl);
+            const response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${jwt}`,
+                    'Accept': 'application/json'
+                }
+            });
+            if (response.ok) {
+                return await response.json();
+            }
+            throw new Error(`Artemis API Fehler (über Proxy): ${response.status} ${response.statusText}`);
+        } catch (proxyError) {
+            if (proxyError instanceof TypeError) {
+                throw new Error(
+                    'Anfrage fehlgeschlagen: Artemis blockiert Cross-Origin-Anfragen (CORS). ' +
+                    'Bitte nutzen Sie eine "Allow CORS" Browser-Erweiterung (z.B. für Chrome/Firefox) ' +
+                    'und versuchen Sie es erneut.'
+                );
+            }
+            throw proxyError;
         }
     }
 

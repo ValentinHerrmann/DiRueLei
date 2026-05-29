@@ -8,7 +8,7 @@
     <!-- Cross-Origin Isolation Headers for SharedArrayBuffer support -->
     <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
     <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' https://cdn.jsdelivr.net/pyodide/ https://pypi.org/ https://files.pythonhosted.org/; worker-src 'self'; child-src blob:; frame-src 'none'; font-src 'self'; base-uri 'self'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' https://cdn.jsdelivr.net/pyodide/ https://pypi.org/ https://files.pythonhosted.org/ https://artemis.tum.de/ https://corsproxy.io/; worker-src 'self'; child-src blob:; frame-src 'none'; font-src 'self'; base-uri 'self'; form-action 'self';">
 
     <!-- APP_VERSION = "2.2.2" -->
     <script src="app.js?v=222"></script>
@@ -90,6 +90,31 @@
                                 <span class="file-type">CSV-Dateien</span>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <div style="text-align: center; margin: 20px 0; font-weight: bold; color: #666;">
+                    &mdash; ODER &mdash;
+                </div>
+
+                <div class="artemis-import-area">
+                    <h3 style="margin-top: 0;">Daten aus Artemis abrufen</h3>
+                    <p class="artemis-help-text">
+                        Zum Abrufen der Studierendendaten benötigen Sie Ihren JWT-Token aus Artemis.<br>
+                        <a href="#" id="artemis-help-toggle" class="artemis-help-link">Wie erhalte ich den JWT-Token?</a>
+                    </p>
+                    <div id="artemis-help-box" class="artemis-help-box hidden">
+                        <ol>
+                            <li>Melden Sie sich bei <a href="https://artemis.tum.de" target="_blank" rel="noopener">artemis.tum.de</a> an.</li>
+                            <li>Öffnen Sie die Entwicklerkonsole (F12) → Reiter <strong>Application</strong> (Chrome) bzw. <strong>Storage</strong> (Firefox).</li>
+                            <li>Unter <strong>Cookies → https://artemis.tum.de</strong> finden Sie den Cookie <code>jwt</code>.</li>
+                            <li>Kopieren Sie den <strong>Wert</strong> (langer Text) und fügen Sie ihn unten ein.</li>
+                        </ol>
+                    </div>
+                    <div class="artemis-form">
+                        <input type="password" id="artemis-jwt" placeholder="JWT-Token einfügen" autocomplete="off">
+                        <input type="text" id="artemis-courseid" placeholder="Course ID (z.B. 233)" autocomplete="off">
+                        <button class="btn" id="fetch-artemis-btn">Daten abrufen</button>
                     </div>
                 </div>
 
@@ -222,7 +247,7 @@
         <div class="footer-content">
             DiRueLei
             <span class="version">v2.2.2</span>
-            <span class="upload-time">vom 29.05.2026, 11:37</span>
+            <span class="upload-time">vom 29.05.2026, 13:54</span>
             <span class="footer-separator">•</span>
             <span class="author">(c) Hannes Funk, Valentin Herrmann; 2026</span>
             <span class="footer-separator">•</span>
