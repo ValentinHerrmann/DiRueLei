@@ -96,6 +96,14 @@ class DiRueLeiApp {
             case 'ERROR':
                 this.showStatus(data.message, 'error');
                 console.error('Worker error:', data.message);
+                
+                // Reset Artemis send UI if it was waiting for extract
+                const sendBtn = document.getElementById('send-artemis-btn');
+                const sendProgress = document.getElementById('artemis-send-progress');
+                if (sendBtn && sendProgress && sendProgress.innerText === 'Bereite Versand vor...') {
+                    sendBtn.disabled = false;
+                    sendProgress.innerText = '';
+                }
                 break;
                 
             default:
