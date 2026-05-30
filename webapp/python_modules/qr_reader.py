@@ -165,11 +165,62 @@ class ExamReader :
             self.logMsg("No ZIP data available. Call saveZipFile() first.", "error")
             return None
 
+    def _compress_pdf_bytes(self, pdf_bytes: bytes, max_size: int) -> bytes:
+        # First, try a quick save to see if just deflating/garbage collection helps
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        out_buf = io.BytesIO()
+        doc.save(out_buf, garbage=4, deflate=True)
+        doc.close()
+        current_bytes = out_buf.getvalue()
+        
+        if len(current_bytes) <= max_size:
+            return current_bytes
+            
+        # Start with a very low compression (high DPI)
+        target_dpi = 400.0
+        
+        while target_dpi >= 50.0:
+            self.logMsg(f"Target DPI: {target_dpi}", "info")
+            zoom = target_dpi / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            
+            # ALWAYS read from the original pdf_bytes to avoid compounding compression artifacts
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            compressed_doc = fitz.open()
+            
+            for page in doc:
+                pix = page.get_pixmap(matrix=mat)
+                new_page = compressed_doc.new_page(width=page.rect.width, height=page.rect.height)
+                try:
+                    img_bytes = pix.tobytes("jpeg")
+                except:
+                    img_bytes = pix.tobytes("png")
+                    
+                new_page.insert_image(page.rect, stream=img_bytes)
+            
+            out_buf = io.BytesIO()
+            compressed_doc.save(out_buf, garbage=4, deflate=True)
+            compressed_doc.close()
+            doc.close()
+            
+            current_bytes = out_buf.getvalue()
+            
+            if len(current_bytes) <= max_size:
+                # We hit the target filesize!
+                break
+                
+            # Increase compression by taking a small step down in DPI
+            target_dpi -= 25.0
+                
+        return current_bytes
+
     def get_student_files(self):
         """Return list of {userId, filename, data} for each student PDF."""
         import re
         result = []
         pattern = re.compile(r'^(.+?)_(\d+)\.pdf$')
+        max_size = 4.8 * 1024 * 1024
+        
         for path, data in self.in_memory_files.items():
             if path == "summary.pdf":
                 continue
@@ -181,7 +232,14 @@ class ExamReader :
             else:
                 user_id = ""
                 student_name = filename
-            result.append({"userId": user_id, "studentName": student_name, "filename": filename, "data": data})
+                
+            upload_data = data
+            if len(data) > max_size:
+                self.logMsg(f"Komprimiere {filename} für Artemis-Upload auf unter 5MB...", "info")
+                upload_data = self._compress_pdf_bytes(data, max_size)
+                self.logMsg(f"{len(upload_data)/len(data):.2f}% ({len(data)/(1024*1024):.2f}MB -> {len(upload_data)/(1024*1024):.2f}MB)", "info")
+                
+            result.append({"userId": user_id, "studentName": student_name, "filename": filename, "data": upload_data})
         return result
             
     def close(self):
