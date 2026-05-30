@@ -8,13 +8,13 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <!-- Cross-Origin Isolation Headers for SharedArrayBuffer support -->
     <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
-    <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
+    <meta http-equiv="Cross-Origin-Embedder-Policy" content="credentialless">
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' https://cdn.jsdelivr.net/pyodide/ https://pypi.org/ https://files.pythonhosted.org/ https://artemis.tum.de/ https://corsproxy.io/; worker-src 'self'; child-src blob:; frame-src 'none'; font-src 'self'; base-uri 'self'; form-action 'self';">
+        content="default-src 'none'; script-src 'self' blob: 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' https://cdn.jsdelivr.net/pyodide/ https://pypi.org/ https://files.pythonhosted.org/ https://artemis.tum.de/ https://*.workers.dev/; worker-src 'self'; child-src blob:; frame-src 'none'; font-src 'self'; base-uri 'self'; form-action 'self';">
 
-    <!-- APP_VERSION = "2.2.3" -->
-    <script src="app.js?v=223"></script>
-    <link rel="stylesheet" href="style.css?v=223">
+    <!-- APP_VERSION = "2.2.4" -->
+    <script src="app.js?v=224"></script>
+    <link rel="stylesheet" href="style.css?v=224">
 </head>
 
 <body>
@@ -291,8 +291,8 @@
     <footer class="footer">
         <div class="footer-content">
             DiRueLei
-            <span class="version">v2.2.3</span>
-            <span class="upload-time">vom 29.05.2026, 21:56</span>
+            <span class="version">v2.2.4</span>
+            <span class="upload-time">vom 30.05.2026, 11:35</span>
             <span class="footer-separator">•</span>
             <span class="author">(c) Hannes Funk, Valentin Herrmann; 2026</span>
             <span class="footer-separator">•</span>

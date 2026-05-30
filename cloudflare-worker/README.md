@@ -24,6 +24,17 @@ Mit **Cloudflare Workers** geht das komplett kostenlos und in wenigen Minuten.
    - Gehe zurück zur Übersichtsseite deines Workers. Dort siehst du eine URL, die so ähnlich aussieht wie:
      `https://artemis-cors-proxy.dein-name.workers.dev`
    - Öffne die Datei `webapp/app.js` in diesem Projekt.
-   - Ändere ganz oben (ca. Zeile 5) den Link `https://DEIN-WORKER-NAME.deine-subdomain.workers.dev/?url=` zu deiner tatsächlichen Worker-URL. Achte darauf, dass `/?url=` am Ende stehen bleibt!
+   - Füge ganz oben (ca. Zeile 7) deine Worker-URL in das Array `ARTEMIS_CORS_PROXIES` ein. Achte darauf, dass `/?url=` am Ende stehen bleibt!
+   - Du kannst mehrere Proxy-URLs eintragen – die App versucht sie der Reihe nach, falls einer nicht erreichbar ist.
 
 Fertig! Deine GitHub Pages Anwendung kann nun wieder erfolgreich auf Artemis zugreifen.
+
+## Funktionsweise
+
+Der Worker leitet Anfragen an Artemis weiter und fügt die nötigen CORS-Headers hinzu.
+
+**Sicherheitsfeatures:**
+- Nur relevante Request-Headers (Authorization, Content-Type, Accept) werden weitergeleitet
+- Potenziell störende Response-Headers von Artemis (CSP, X-Frame-Options etc.) werden entfernt
+- Origin- und Referer-Headers werden nicht an Artemis weitergeleitet
+- Fehler werden als JSON mit CORS-Headers zurückgegeben (kein stilles Scheitern)
