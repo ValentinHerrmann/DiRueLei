@@ -292,11 +292,37 @@ def log_callback(message, level='info'):
 }
 
 function handleExtractStudentFiles() {
+    let progressCallback = null;
+    let logCallback = null;
     try {
         if (!lastExamReader) {
             postMessage({ type: 'ERROR', message: 'Keine Scan-Ergebnisse vorhanden. Bitte zuerst PDFs scannen.' });
             return;
         }
+
+        pyodide.runPython(`
+import js
+from pyodide.ffi import to_js
+
+def progress_callback(percentage):
+    js.postMessage(to_js({
+        'type': 'SCAN_PROGRESS',
+        'percentage': float(percentage)
+    }, dict_converter=js.Object.fromEntries))
+
+def log_callback(message, level='info'):
+    js.postMessage(to_js({
+        'type': 'SCAN_LOG',
+        'message': str(message),
+        'level': str(level)
+    }, dict_converter=js.Object.fromEntries))
+        `);
+        
+        progressCallback = pyodide.globals.get('progress_callback');
+        logCallback = pyodide.globals.get('log_callback');
+        
+        lastExamReader.progress_callback = progressCallback;
+        lastExamReader.log_callback = logCallback;
 
         const filesProxy = lastExamReader.get_student_files();
         const filesList = filesProxy.toJs({ dict_converter: Object.fromEntries });
@@ -327,5 +353,8 @@ function handleExtractStudentFiles() {
             type: 'ERROR',
             message: `Fehler beim Extrahieren der Studierenden-Dateien: ${error.message}`
         });
+    } finally {
+        if (progressCallback) progressCallback.destroy();
+        if (logCallback) logCallback.destroy();
     }
 }

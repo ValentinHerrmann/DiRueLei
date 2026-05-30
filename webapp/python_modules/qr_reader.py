@@ -106,10 +106,33 @@ class ExamReader :
         self.logMsg("PDFs merged in memory", "success")
         return fitz.open(stream=merged_buffer.getvalue(), filetype="pdf")
 
+    def _get_sort_key(self, student_str: str) -> str:
+        name = student_str.split("_")[0].strip()
+        
+        if "," in name:
+            last_name = name.split(",")[0].strip()
+        else:
+            parts = name.split()
+            last_name = parts[-1] if parts else name
+            
+        mod_name = last_name.lower()
+        if mod_name.startswith('von der ') or mod_name.startswith('van der '):
+            return mod_name[8:]
+        elif mod_name.startswith('van de ') or mod_name.startswith('von de '):
+            return mod_name[7:]
+        elif mod_name.startswith('van ') or mod_name.startswith('von ') or mod_name.startswith('san '):
+            return mod_name[4:]
+        elif mod_name.startswith('de ') or mod_name.startswith('da ') or mod_name.startswith('la ') or mod_name.startswith('le ') or mod_name.startswith('st '):
+            return mod_name[3:]
+        return mod_name
+
     def saveZipFile(self) : 
         self.summary = []
         preview_pdf = []
-        for student in self.student_page_map :
+        
+        sorted_students = sorted(self.student_page_map.keys(), key=self._get_sort_key)
+        
+        for student in sorted_students :
             num_pages, student_file_data = self._create_student_pdf(student)
             self.summary.append({
                 "Schüler/-in": student.split("_")[0], 
@@ -142,14 +165,72 @@ class ExamReader :
             self.logMsg("No ZIP data available. Call saveZipFile() first.", "error")
             return None
 
+    def _compress_pdf_bytes(self, pdf_bytes: bytes, max_size: int) -> bytes:
+        # First, try a quick save to see if just deflating/garbage collection helps
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        out_buf = io.BytesIO()
+        doc.save(out_buf, garbage=4, deflate=True)
+        doc.close()
+        current_bytes = out_buf.getvalue()
+        
+        if len(current_bytes) <= max_size:
+            return current_bytes
+            
+        # Start with a very low compression (high DPI)
+        target_dpi = 400.0
+        
+        while target_dpi >= 50.0:
+            self.logMsg(f"Target DPI: {target_dpi}", "info")
+            zoom = target_dpi / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            
+            # ALWAYS read from the original pdf_bytes to avoid compounding compression artifacts
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            compressed_doc = fitz.open()
+            
+            for page in doc:
+                pix = page.get_pixmap(matrix=mat)
+                new_page = compressed_doc.new_page(width=page.rect.width, height=page.rect.height)
+                try:
+                    img_bytes = pix.tobytes("jpeg")
+                except Exception:
+                    img_bytes = pix.tobytes("png")
+                    
+                new_page.insert_image(page.rect, stream=img_bytes)
+            
+            out_buf = io.BytesIO()
+            compressed_doc.save(out_buf, garbage=4, deflate=True)
+            compressed_doc.close()
+            doc.close()
+            
+            current_bytes = out_buf.getvalue()
+            
+            if len(current_bytes) <= max_size:
+                # We hit the target filesize!
+                break
+                
+            # Instead of a flat -25 DPI step (which takes many slow iterations),
+            # mathematically jump directly to the optimal DPI based on the exact overshoot.
+            ratio = max_size / len(current_bytes)
+            target_dpi = target_dpi * (ratio ** 0.5) * 0.95
+            
+        if len(current_bytes) > max_size:
+            raise ValueError(f"Zielgröße von {max_size/(1024*1024):.2f} MB konnte nicht erreicht werden (Aktuell: {len(current_bytes)/(1024*1024):.2f} MB).")
+                
+        return current_bytes
+
     def get_student_files(self):
         """Return list of {userId, filename, data} for each student PDF."""
         import re
         result = []
         pattern = re.compile(r'^(.+?)_(\d+)\.pdf$')
-        for path, data in self.in_memory_files.items():
-            if path == "summary.pdf":
-                continue
+        max_size = 4.8 * 1024 * 1024
+        
+        # Filter files to process
+        files_to_process = [(path, data) for path, data in self.in_memory_files.items() if path != "summary.pdf"]
+        total_files = len(files_to_process)
+        
+        for i, (path, data) in enumerate(files_to_process):
             filename = path.split("/")[-1]
             match = pattern.match(filename)
             if match:
@@ -158,7 +239,23 @@ class ExamReader :
             else:
                 user_id = ""
                 student_name = filename
-            result.append({"userId": user_id, "studentName": student_name, "filename": filename, "data": data})
+                
+            upload_data = data
+            if len(data) > max_size:
+                self.logMsg(f"Komprimiere {filename} für Artemis-Upload auf unter 5MB...", "info")
+                try:
+                    upload_data = self._compress_pdf_bytes(data, max_size)
+                    self.logMsg(f"{len(upload_data)/len(data)*100:.2f}% ({len(data)/(1024*1024):.2f}MB -> {len(upload_data)/(1024*1024):.2f}MB)", "info")
+                except ValueError as e:
+                    self.logMsg(f"Fehler bei {filename}: {str(e)}", "error")
+                    raise ValueError(f"Konnte {filename} nicht ausreichend komprimieren: {str(e)}")
+                
+            result.append({"userId": user_id, "studentName": student_name, "filename": filename, "data": upload_data})
+            
+            # Update progress bar
+            if self.progress_callback:
+                self.progress_callback((i + 1) / total_files)
+                
         return result
             
     def close(self):

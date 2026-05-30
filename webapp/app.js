@@ -1,11 +1,14 @@
 // app.js - DiRueLei Web Application
 
-// CORS proxy for Artemis API requests (Artemis does not send CORS headers).
-// Users can deploy their own proxy (see cors-proxy/ folder) or use a public one.
-// Hier die URL von deinem Cloudflare Worker eintragen (siehe cloudflare-worker/README.md)
-// WICHTIG: Das "?url=" am Ende muss stehen bleiben!
-const ARTEMIS_CORS_PROXY = 'https://diruelei.b2j-cors-proxy.workers.dev/?url=';
+// CORS proxies for Artemis API requests (Artemis does not send CORS headers).
+// Multiple proxies are tried in order as fallback if one is unavailable.
+// Users can deploy their own proxy (see cloudflare-worker/ folder).
+// WICHTIG: Jeder Eintrag muss mit "?url=" oder einem URL-Parameter enden!
+const ARTEMIS_CORS_PROXIES = [
+    'https://diruelei.b2j-cors-proxy.workers.dev/?url=',
+];
 const ARTEMIS_API_BASE = 'https://artemis.tum.de/api/';
+
 
 class DiRueLeiApp {
     constructor() {
@@ -41,7 +44,7 @@ class DiRueLeiApp {
         }
 
         console.log('Initializing scan worker...');
-        this.scanWorker = new Worker('scan-worker.js?v=223');
+        this.scanWorker = new Worker('scan-worker.js?v=227');
 
         this.scanWorker.onmessage = (event) => {
             this.handleWorkerMessage(event.data);
@@ -225,7 +228,6 @@ class DiRueLeiApp {
     }
 
     setupDropzone(dropzone, fileInput, onFilesSelected) {
-        +
         dropzone.addEventListener('click', () => {
             fileInput.click();
         });
@@ -366,7 +368,8 @@ class DiRueLeiApp {
             students.sort((a, b) => {
                 const getLastName = (student) => {
                     const parts = student.name.split(' ');
-                    return parts[parts.length - 1]
+                    const modName = this.getLastNameForSorting(parts[parts.length - 1]);
+                    return modName;
                 }
 
                 return getLastName(a).localeCompare(getLastName(b));
@@ -423,7 +426,7 @@ class DiRueLeiApp {
             }
 
             let students = studentsList.map(s => {
-                let name = s.name || `${s.firstName || ''} ${s.lastName || ''}`.trim();
+                let name = `${s.lastName || ''}, ${s.firstName || ''}`.trim() || s.name;
                 return {
                     id: s.id ? s.id.toString() : '',
                     name: name
@@ -431,11 +434,9 @@ class DiRueLeiApp {
             });
 
             students.sort((a, b) => {
-                const getLastName = (student) => {
-                    const parts = student.name.split(' ');
-                    return parts[parts.length - 1]
-                }
-                return getLastName(a).localeCompare(getLastName(b));
+                const lastNameA = this.getLastNameForSorting(a.name);
+                const lastNameB = this.getLastNameForSorting(b.name);
+                return lastNameA.localeCompare(lastNameB);
             });
 
             this.className = "_Artemis";
@@ -456,6 +457,27 @@ class DiRueLeiApp {
         }
     }
 
+
+    /**
+     * Requires lastname comma first! (lastname, firstname)
+     */
+    getLastNameForSorting(name) {
+        let modName = name.toLowerCase();
+        if (modName.startsWith('von der ') || modName.startsWith('van der ')) {
+            return modName.substring(8);
+        }
+        else if (modName.startsWith('van de ') || modName.startsWith('von de ')) {
+            return modName.substring(7);
+        }
+        else if (modName.startsWith('van ') || modName.startsWith('von ') || modName.startsWith('san ')) {
+            return modName.substring(4);
+        }
+        else if (modName.startsWith('de ') || modName.startsWith('da ') || modName.startsWith('la ') || modName.startsWith('le ') || modName.startsWith('st ')) {
+            return modName.substring(3);
+        }
+        return modName;
+    }
+
     /**
      * Fetch students from Artemis, trying direct request first, then CORS proxy.
      */
@@ -466,6 +488,7 @@ class DiRueLeiApp {
 
     /**
      * General purpose Artemis API request with CORS proxy fallback.
+     * Tries direct request first, then each configured proxy in order.
      */
     async artemisApiRequest(jwt, endpoint, method, body = null, isMultipart = false) {
         const directUrl = ARTEMIS_API_BASE + endpoint;
@@ -481,51 +504,102 @@ class DiRueLeiApp {
             }
         }
 
-        let options = {
-            method: method,
-            headers: headers
-        };
-
+        // Serialize body once (needed for retries; FormData can only be read once)
+        let serializedBody = null;
         if (body) {
-            options.body = isMultipart ? body : JSON.stringify(body);
+            serializedBody = isMultipart ? body : JSON.stringify(body);
         }
 
-        // Try 1: Direct request
+        const makeOptions = () => {
+            let opts = {
+                method: method,
+                headers: { ...headers }
+            };
+            if (serializedBody) {
+                opts.body = serializedBody;
+            }
+            return opts;
+        };
+
+        // Try 1: Direct request (skip if we already know CORS is blocked)
         if (!this.artemisCorsBlocked) {
             try {
-                const response = await fetch(directUrl, options);
+                const response = await fetch(directUrl, makeOptions());
                 if (response.ok) {
                     return await response.json();
                 }
-                throw new Error(`Artemis API Fehler: ${response.status} ${response.statusText}`);
+                const errorText = await this._safeResponseText(response);
+                throw new Error(`Artemis API Fehler: ${response.status} ${response.statusText}${errorText ? ' - ' + errorText : ''}`);
             } catch (directError) {
                 if (directError instanceof TypeError) {
                     console.log('Direct request blocked by CORS, switching to proxy for future requests...');
-                    this.artemisCorsBlocked = true; // Remember that CORS is blocked to avoid console spam
+                    this.artemisCorsBlocked = true;
                 } else {
                     throw directError;
                 }
             }
         }
 
-        // Try 2: CORS proxy
+        // Try 2: CORS proxies in order
+        const proxies = [...ARTEMIS_CORS_PROXIES];
+        if (this._workingProxyIndex != null && this._workingProxyIndex > 0) {
+            const preferred = proxies.splice(this._workingProxyIndex, 1)[0];
+            if (preferred) proxies.unshift(preferred);
+        }
+
+        const errors = [];
+        for (let i = 0; i < proxies.length; i++) {
+            const proxyBase = proxies[i];
+            const proxyUrl = proxyBase + encodeURIComponent(directUrl);
+            try {
+                const response = await fetch(proxyUrl, makeOptions());
+                if (response.ok) {
+                    this._workingProxyIndex = ARTEMIS_CORS_PROXIES.indexOf(proxyBase);
+                    return await response.json();
+                }
+                const errorText = await this._safeResponseText(response);
+                throw new Error(`Artemis API Fehler (Proxy ${i + 1}): ${response.status} ${response.statusText}${errorText ? ' - ' + errorText : ''}`);
+            } catch (proxyError) {
+                if (proxyError instanceof TypeError) {
+                    console.warn(`CORS proxy ${i + 1} (${proxyBase}) nicht erreichbar, versuche nächsten...`);
+                    errors.push(`Proxy ${i + 1}: nicht erreichbar`);
+                    continue;
+                }
+                throw proxyError;
+            }
+        }
+
+        // All proxies failed with network errors
+        throw new Error(
+            'Anfrage fehlgeschlagen: Keiner der konfigurierten CORS-Proxys ist erreichbar. ' +
+            'Details: ' + errors.join('; ') + '. ' +
+            'Mögliche Lösung: Eigenen CORS-Proxy einrichten (siehe cloudflare-worker/README.md) ' +
+            'oder eine Browser-Erweiterung nutzen (z.B. "Allow CORS").'
+        );
+    }
+
+    /**
+     * Safely extract response text for error messages.
+     * Returns a short summary or empty string if the response can't be read.
+     */
+    async _safeResponseText(response) {
         try {
-            const proxyUrl = ARTEMIS_CORS_PROXY + encodeURIComponent(directUrl);
-            const response = await fetch(proxyUrl, options);
-            if (response.ok) {
-                return await response.json();
+            const text = await response.text();
+            if (text.startsWith('<!') || text.startsWith('<html')) {
+                return '(HTML-Fehlerseite vom Server)';
             }
-            throw new Error(`Artemis API Fehler (über Proxy): ${response.status} ${response.statusText}`);
-        } catch (proxyError) {
-            if (proxyError instanceof TypeError) {
-                throw new Error(
-                    'Anfrage fehlgeschlagen: Artemis blockiert Cross-Origin-Anfragen (CORS). ' +
-                    'Bitte versuchen Sie es erneut oder nutzen Sie eine Browser-Erweiterung (z.B. "Allow CORS").'
-                );
+            try {
+                const json = JSON.parse(text);
+                return json.message || json.error || text.substring(0, 200);
+            } catch {
+                return text.substring(0, 200);
             }
-            throw proxyError;
+        } catch {
+            return '';
         }
     }
+
+
 
     toggleArtemisHelp(e) {
         if (e) e.preventDefault();
@@ -881,6 +955,9 @@ class DiRueLeiApp {
             const progressBar = document.getElementById('scan-progress-bar');
             if (progressBar) {
                 progressBar.classList.remove("hidden");
+                if (progressBar.parentNode) {
+                    progressBar.parentNode.classList.remove("hidden");
+                }
                 progressBar.style.width = '0%';
                 progressBar.textContent = '0%';
                 progressBar.setAttribute('aria-valuenow', 0);
