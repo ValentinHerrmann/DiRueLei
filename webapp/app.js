@@ -44,7 +44,7 @@ class DiRueLeiApp {
         }
 
         console.log('Initializing scan worker...');
-        this.scanWorker = new Worker('scan-worker.js?v=224');
+        this.scanWorker = new Worker('scan-worker.js?v=225');
 
         this.scanWorker.onmessage = (event) => {
             this.handleWorkerMessage(event.data);
@@ -228,10 +228,9 @@ class DiRueLeiApp {
     }
 
     setupDropzone(dropzone, fileInput, onFilesSelected) {
-        +
-            dropzone.addEventListener('click', () => {
-                fileInput.click();
-            });
+        dropzone.addEventListener('click', () => {
+            fileInput.click();
+        });
 
         // Drag and drop events
         dropzone.addEventListener('dragover', (e) => {
@@ -369,10 +368,11 @@ class DiRueLeiApp {
             students.sort((a, b) => {
                 const getLastName = (student) => {
                     const parts = student.name.split(' ');
-                    return parts[parts.length - 1]
+                    const modName = this.getLastNameForSorting(parts[parts.length - 1]);
+                    return modName;
                 }
 
-                return getLastName(a).localeCompare(getLastName(b));
+                return this.getLastName(a).localeCompare(getLastName(b));
             });
 
             this.allStudents = students;
@@ -434,11 +434,7 @@ class DiRueLeiApp {
             });
 
             students.sort((a, b) => {
-                const getLastName = (student) => {
-                    const parts = student.name.split(' ');
-                    return parts[parts.length - 1]
-                }
-                return getLastName(a).localeCompare(getLastName(b));
+                return getLastNameForSorting(a).localeCompare(getLastNameForSorting(b));
             });
 
             this.className = "_Artemis";
@@ -457,6 +453,27 @@ class DiRueLeiApp {
             btn.innerText = originalText;
             btn.disabled = false;
         }
+    }
+
+
+    /**
+     * Requires lastname comma first! (lastname, firstname)
+     */
+    getLastNameForSorting(name) {
+        let modName = name.toLowerCase();
+        if (modName.startsWith('von der ') || modName.startsWith('van der ')) {
+            return modName.substring(8);
+        }
+        else if (modName.startsWith('van de ') || modName.startsWith('von de ')) {
+            return modName.substring(7);
+        }
+        else if (modName.startsWith('van ') || modName.startsWith('von ') || modName.startsWith('san ')) {
+            return modName.substring(4);
+        }
+        else if (modName.startsWith('de ') || modName.startsWith('da ') || modName.startsWith('la ') || modName.startsWith('le ') || modName.startsWith('st ')) {
+            return modName.substring(3);
+        }
+        return modName;
     }
 
     /**

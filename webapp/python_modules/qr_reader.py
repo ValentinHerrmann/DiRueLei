@@ -106,10 +106,33 @@ class ExamReader :
         self.logMsg("PDFs merged in memory", "success")
         return fitz.open(stream=merged_buffer.getvalue(), filetype="pdf")
 
+    def _get_sort_key(self, student_str: str) -> str:
+        name = student_str.split("_")[0].strip()
+        
+        if "," in name:
+            last_name = name.split(",")[0].strip()
+        else:
+            parts = name.split()
+            last_name = parts[-1] if parts else name
+            
+        mod_name = last_name.lower()
+        if mod_name.startswith('von der ') or mod_name.startswith('van der '):
+            return mod_name[8:]
+        elif mod_name.startswith('van de ') or mod_name.startswith('von de '):
+            return mod_name[7:]
+        elif mod_name.startswith('van ') or mod_name.startswith('von ') or mod_name.startswith('san '):
+            return mod_name[4:]
+        elif mod_name.startswith('de ') or mod_name.startswith('da ') or mod_name.startswith('la ') or mod_name.startswith('le ') or mod_name.startswith('st '):
+            return mod_name[3:]
+        return mod_name
+
     def saveZipFile(self) : 
         self.summary = []
         preview_pdf = []
-        for student in self.student_page_map :
+        
+        sorted_students = sorted(self.student_page_map.keys(), key=self._get_sort_key)
+        
+        for student in sorted_students :
             num_pages, student_file_data = self._create_student_pdf(student)
             self.summary.append({
                 "Schüler/-in": student.split("_")[0], 
