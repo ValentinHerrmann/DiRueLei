@@ -209,8 +209,10 @@ class ExamReader :
                 # We hit the target filesize!
                 break
                 
-            # Increase compression by taking a small step down in DPI
-            target_dpi -= 25.0
+            # Instead of a flat -25 DPI step (which takes many slow iterations),
+            # mathematically jump directly to the optimal DPI based on the exact overshoot.
+            ratio = max_size / len(current_bytes)
+            target_dpi = target_dpi * (ratio ** 0.5) * 0.95
                 
         return current_bytes
 
@@ -221,9 +223,11 @@ class ExamReader :
         pattern = re.compile(r'^(.+?)_(\d+)\.pdf$')
         max_size = 4.8 * 1024 * 1024
         
-        for path, data in self.in_memory_files.items():
-            if path == "summary.pdf":
-                continue
+        # Filter files to process
+        files_to_process = [(path, data) for path, data in self.in_memory_files.items() if path != "summary.pdf"]
+        total_files = len(files_to_process)
+        
+        for i, (path, data) in enumerate(files_to_process):
             filename = path.split("/")[-1]
             match = pattern.match(filename)
             if match:
@@ -237,9 +241,14 @@ class ExamReader :
             if len(data) > max_size:
                 self.logMsg(f"Komprimiere {filename} für Artemis-Upload auf unter 5MB...", "info")
                 upload_data = self._compress_pdf_bytes(data, max_size)
-                self.logMsg(f"{len(upload_data)/len(data):.2f}% ({len(data)/(1024*1024):.2f}MB -> {len(upload_data)/(1024*1024):.2f}MB)", "info")
+                self.logMsg(f"{len(upload_data)/len(data)*100:.2f}% ({len(data)/(1024*1024):.2f}MB -> {len(upload_data)/(1024*1024):.2f}MB)", "info")
                 
             result.append({"userId": user_id, "studentName": student_name, "filename": filename, "data": upload_data})
+            
+            # Update progress bar
+            if self.progress_callback:
+                self.progress_callback((i + 1) / total_files)
+                
         return result
             
     def close(self):

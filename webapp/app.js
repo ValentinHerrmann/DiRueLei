@@ -953,6 +953,9 @@ class DiRueLeiApp {
             const progressBar = document.getElementById('scan-progress-bar');
             if (progressBar) {
                 progressBar.classList.remove("hidden");
+                if (progressBar.parentNode) {
+                    progressBar.parentNode.classList.remove("hidden");
+                }
                 progressBar.style.width = '0%';
                 progressBar.textContent = '0%';
                 progressBar.setAttribute('aria-valuenow', 0);
