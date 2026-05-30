@@ -213,6 +213,9 @@ class ExamReader :
             # mathematically jump directly to the optimal DPI based on the exact overshoot.
             ratio = max_size / len(current_bytes)
             target_dpi = target_dpi * (ratio ** 0.5) * 0.95
+            
+        if len(current_bytes) > max_size:
+            raise ValueError(f"Zielgröße von {max_size/(1024*1024):.2f} MB konnte nicht erreicht werden (Aktuell: {len(current_bytes)/(1024*1024):.2f} MB).")
                 
         return current_bytes
 
@@ -240,8 +243,12 @@ class ExamReader :
             upload_data = data
             if len(data) > max_size:
                 self.logMsg(f"Komprimiere {filename} für Artemis-Upload auf unter 5MB...", "info")
-                upload_data = self._compress_pdf_bytes(data, max_size)
-                self.logMsg(f"{len(upload_data)/len(data)*100:.2f}% ({len(data)/(1024*1024):.2f}MB -> {len(upload_data)/(1024*1024):.2f}MB)", "info")
+                try:
+                    upload_data = self._compress_pdf_bytes(data, max_size)
+                    self.logMsg(f"{len(upload_data)/len(data)*100:.2f}% ({len(data)/(1024*1024):.2f}MB -> {len(upload_data)/(1024*1024):.2f}MB)", "info")
+                except ValueError as e:
+                    self.logMsg(f"Fehler bei {filename}: {str(e)}", "error")
+                    raise ValueError(f"Konnte {filename} nicht ausreichend komprimieren: {str(e)}")
                 
             result.append({"userId": user_id, "studentName": student_name, "filename": filename, "data": upload_data})
             
