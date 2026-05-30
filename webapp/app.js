@@ -434,7 +434,9 @@ class DiRueLeiApp {
             });
 
             students.sort((a, b) => {
-                return getLastNameForSorting(a).localeCompare(getLastNameForSorting(b));
+                const lastNameA = this.getLastNameForSorting(a.name);
+                const lastNameB = this.getLastNameForSorting(b.name);
+                return lastNameA.localeCompare(lastNameB);
             });
 
             this.className = "_Artemis";
