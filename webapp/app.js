@@ -372,7 +372,7 @@ class DiRueLeiApp {
                     return modName;
                 }
 
-                return this.getLastName(a).localeCompare(getLastName(b));
+                return getLastName(a).localeCompare(getLastName(b));
             });
 
             this.allStudents = students;
