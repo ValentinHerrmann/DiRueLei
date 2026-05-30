@@ -193,7 +193,7 @@ class ExamReader :
                 new_page = compressed_doc.new_page(width=page.rect.width, height=page.rect.height)
                 try:
                     img_bytes = pix.tobytes("jpeg")
-                except:
+                except Exception:
                     img_bytes = pix.tobytes("png")
                     
                 new_page.insert_image(page.rect, stream=img_bytes)
