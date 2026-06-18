@@ -522,7 +522,7 @@ class DiRueLeiApp {
         };
 
         // Try 1: Direct request (skip if we already know CORS is blocked)
-        if (!this.artemisCorsBlocked) {
+        if (false && !this.artemisCorsBlocked) {
             try {
                 const response = await fetch(directUrl, makeOptions());
                 if (response.ok) {
@@ -679,7 +679,8 @@ class DiRueLeiApp {
                 // 1. Create/Get one-to-one chat
                 const chatEndpoint = `communication/courses/${courseId}/one-to-one-chats`;
                 //const chatEndpoint = `communication/courses/${courseId}/one-to-one-chats/${userId}`;
-                const chatData = await this.artemisApiRequest(jwt, chatEndpoint, 'POST', { "userId": userId });
+                // ponytail: backend expects an integer, not a string (returns 400 otherwise)
+                const chatData = await this.artemisApiRequest(jwt, chatEndpoint, 'POST', { "userId": parseInt(userId, 10) });
 
                 const conversationId = chatData.id;
                 if (!conversationId) {
