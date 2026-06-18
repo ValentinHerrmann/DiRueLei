@@ -677,8 +677,9 @@ class DiRueLeiApp {
 
             try {
                 // 1. Create/Get one-to-one chat
-                const chatEndpoint = `communication/courses/${courseId}/one-to-one-chats/${userId}`;
-                const chatData = await this.artemisApiRequest(jwt, chatEndpoint, 'POST', {});
+                const chatEndpoint = `communication/courses/${courseId}/one-to-one-chats`;
+                //const chatEndpoint = `communication/courses/${courseId}/one-to-one-chats/${userId}`;
+                const chatData = await this.artemisApiRequest(jwt, chatEndpoint, 'POST', { "userId": userId });
 
                 const conversationId = chatData.id;
                 if (!conversationId) {
